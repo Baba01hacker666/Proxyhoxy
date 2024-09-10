@@ -1,80 +1,89 @@
 import http.server
-import socketserver
 import os
+from urllib.parse import unquote
 from datetime import datetime
 
-# Import shared data (ensure it's placed in the same directory as the proxy script)
-from proxy_server.py import total_data_transferred, files_downloaded, last_request_time, proxy_start_time, log_file_path, download_folder
+LOG_FILE_PATH = "datapassed.txt"
+DOWNLOAD_FOLDER = "downloads"
 
-# Admin panel handler
-class AdminPanelHandler(http.server.SimpleHTTPRequestHandler):
+# Ensure the directories exist
+if not os.path.exists(DOWNLOAD_FOLDER):
+    os.makedirs(DOWNLOAD_FOLDER)
+
+class AdminHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
         if self.path == '/':
-            # Serve the admin panel with proxy stats
+            self.show_dashboard()
+        elif self.path == '/files':
+            self.show_files()
+        elif self.path.startswith('/download/'):
+            self.handle_file_download()
+        else:
+            self.send_error(404, "File Not Found")
+
+    def show_dashboard(self):
+        """Display the logs from datapassed.txt."""
+        self.send_response(200)
+        self.send_header('Content-type', 'text/html')
+        self.end_headers()
+
+        self.wfile.write(b"<html><head><title>Proxy Admin Panel</title></head><body>")
+        self.wfile.write(b"<h1>Proxy Admin Panel</h1>")
+        self.wfile.write(b"<h2>Logs:</h2><pre>")
+
+        if os.path.exists(LOG_FILE_PATH):
+            with open(LOG_FILE_PATH, 'r') as log_file:
+                for line in log_file:
+                    self.wfile.write(line.encode())
+        else:
+            self.wfile.write(b"No logs available.")
+        
+        self.wfile.write(b"</pre>")
+        self.wfile.write(b"<h2><a href='/files'>Download Files</a></h2>")
+        self.wfile.write(b"</body></html>")
+
+    def show_files(self):
+        """List files available for download in the download folder."""
+        self.send_response(200)
+        self.send_header('Content-type', 'text/html')
+        self.end_headers()
+
+        self.wfile.write(b"<html><head><title>Download Files</title></head><body>")
+        self.wfile.write(b"<h1>Downloadable Files</h1><ul>")
+
+        if os.path.exists(DOWNLOAD_FOLDER):
+            for filename in os.listdir(DOWNLOAD_FOLDER):
+                file_url = f"/download/{filename}"
+                self.wfile.write(f"<li><a href='{file_url}'>{filename}</a></li>".encode())
+        else:
+            self.wfile.write(b"No files available for download.")
+
+        self.wfile.write(b"</ul>")
+        self.wfile.write(b"<a href='/'>Back to Dashboard</a>")
+        self.wfile.write(b"</body></html>")
+
+    def handle_file_download(self):
+        """Serve the file requested in the URL."""
+        filename = unquote(self.path[len('/download/'):])
+        file_path = os.path.join(DOWNLOAD_FOLDER, filename)
+
+        if os.path.exists(file_path):
             self.send_response(200)
-            self.send_header('Content-type', 'text/html')
+            self.send_header('Content-Disposition', f'attachment; filename={filename}')
+            self.send_header('Content-type', 'application/octet-stream')
             self.end_headers()
 
-            uptime = datetime.now() - proxy_start_time
-            last_request = last_request_time.strftime('%Y-%m-%d %H:%M:%S') if last_request_time else "No requests yet"
-
-            html = f"""
-            <html>
-            <head><title>Proxy Admin Panel</title></head>
-            <body>
-                <h1>Proxy Admin Panel</h1>
-                <p><strong>Uptime:</strong> {uptime}</p>
-                <p><strong>Total Data Transferred:</strong> {total_data_transferred} bytes</p>
-                <p><strong>Files Downloaded:</strong> {files_downloaded}</p>
-                <p><strong>Last Request Time:</strong> {last_request}</p>
-                <h2>Logs</h2>
-                <p><a href="/logs">View Logs</a></p>
-                <h2>Downloads</h2>
-                <p><a href="/downloads">View Downloads</a></p>
-            </body>
-            </html>
-            """
-            self.wfile.write(html.encode('utf-8'))
-
-        elif self.path == '/logs':
-            # Serve the log file content
-            if os.path.exists(log_file_path):
-                self.send_response(200)
-                self.send_header('Content-type', 'text/plain')
-                self.end_headers()
-                with open(log_file_path, 'r') as log_file:
-                    self.wfile.write(log_file.read().encode('utf-8'))
-            else:
-                self.send_error(404, "Log file not found")
-
-        elif self.path == '/downloads':
-            # Serve a list of downloaded files
-            if os.path.exists(download_folder):
-                self.send_response(200)
-                self.send_header('Content-type', 'text/html')
-                self.end_headers()
-
-                files = os.listdir(download_folder)
-                files_list = "".join([f"<li>{file}</li>" for file in files])
-
-                html = f"""
-                <html>
-                <head><title>Downloads</title></head>
-                <body>
-                    <h1>Downloaded Files</h1>
-                    <ul>{files_list}</ul>
-                </body>
-                </html>
-                """
-                self.wfile.write(html.encode('utf-8'))
-            else:
-                self.send_error(404, "Download folder not found")
-
+            with open(file_path, 'rb') as file:
+                self.wfile.write(file.read())
         else:
-            self.send_error(404, "Page not found")
+            self.send_error(404, "File Not Found")
 
-# Function to start the admin panel server
-def run_admin_panel(port=8081):
-    with socketserver.TCPServer(("", port), AdminPanelHandler) as httpd:
-        print(f"Admin panel running on port {port}")
-        httpd.serve_forever()
+def run_server():
+    PORT = 5000
+    server_address = ('', PORT)
+    httpd = http.server.HTTPServer(server_address, AdminHandler)
+    print(f"Admin panel running on port {PORT}")
+    httpd.serve_forever()
+
+if __name__ == "__main__":
+    run_server()
