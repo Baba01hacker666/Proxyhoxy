@@ -4,7 +4,7 @@ import os
 from datetime import datetime
 
 # Import shared data (ensure it's placed in the same directory as the proxy script)
-from proxy import total_data_transferred, files_downloaded, last_request_time, proxy_start_time, log_file_path, download_folder
+from proxy_server.py import total_data_transferred, files_downloaded, last_request_time, proxy_start_time, log_file_path, download_folder
 
 # Admin panel handler
 class AdminPanelHandler(http.server.SimpleHTTPRequestHandler):
