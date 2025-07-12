@@ -4,8 +4,6 @@ Proxyhoxy is a powerful intercepting Man-in-the-Middle (MITM) proxy for HTTP and
 
 It can automatically download specific file types, decrypt and modify HTTPS content on the fly, and replace keywords in web pages, all managed through a simple configuration file and a web-based admin panel.
 
-![Admin Panel Screenshot](https://user-images.githubusercontent.com/your-username/your-repo/your-image.png)  <!-- Optional: Add a screenshot of your admin panel later -->
-
 ## Features
 
 *   **HTTP & HTTPS Interception:** Decrypts and inspects TLS/SSL traffic using a Man-in-the-Middle approach.
@@ -40,3 +38,82 @@ Open your terminal and clone the repository to your local machine.
 ```bash
 git clone https://github.com/Baba01hacker666/Proxyhoxy.git
 cd Proxyhoxy
+```
+
+### Step 2: Install Dependencies
+
+The project requires `pyopenssl` to handle SSL/TLS certificate operations. Install it using pip.
+
+```bash
+pip install -r requirements.txt
+```
+*(On some systems, you may need to use `pip3`)*
+
+### Step 3: Generate the Certificate Authority (CA)
+
+This is a **one-time setup step**. You need to create your own local CA which will be used to sign certificates for the websites you visit.
+
+```bash
+python3 generate_ca.py
+```
+This creates a `certs` directory containing `ca.crt` (the public certificate) and `ca.key` (the private key).
+
+### Step 4: Install and Trust the CA Certificate
+
+This is the most critical step for intercepting HTTPS traffic. You must tell your browser or OS to trust your newly created CA.
+
+**Instructions for Chrome/Edge:**
+1.  Go to **Settings** → **Privacy and security** → **Security** → **Manage certificates**.
+2.  Click the **Authorities** tab and then click **Import...**.
+3.  Navigate to your `Proxyhoxy/certs` folder and select the `ca.crt` file.
+4.  In the dialog box, **check the box "Trust this certificate for identifying websites."** and click **OK**.
+
+**Instructions for Firefox:**
+1.  Go to **Settings** and search for "certificates".
+2.  Click **View Certificates...**.
+3.  In the **Authorities** tab, click **Import...**.
+4.  Select the `ca.crt` file.
+5.  **Check the box "Trust this CA to identify websites."** and click **OK**.
+
+### Step 5: Configure the Proxy
+
+All settings are in the `config.ini` file. You can edit it to:
+*   Change the `proxy_port` or `admin_port`.
+*   Enable or disable `https_mitm` or `content_replacement`.
+*   Add or change keywords for content modification.
+
+```ini
+[content_modification]
+# ...
+# Example: "Google" will be replaced with "Proxyhoxy"
+Google = Proxyhoxy
+```
+
+### Step 6: Run Proxyhoxy
+
+Start both the proxy server and the admin panel with a single command.
+
+```bash
+python3 proxy_server.py & python3 admin_panel.py
+```
+The terminal will confirm that both servers are running.
+
+### Step 7: Configure Your System/Browser to Use the Proxy
+
+1.  Go to your operating system's or browser's network proxy settings.
+2.  Enable **manual proxy** configuration.
+3.  Set the following:
+    *   **Server/Address:** `127.0.0.1` (or `localhost`)
+    *   **Port:** `8080` (or the `proxy_port` from `config.ini`)
+4.  Apply these settings for both **HTTP** and **HTTPS** (Secure Web Proxy).
+
+## Usage
+
+*   **Browse the web:** Your traffic will now be routed through Proxyhoxy. Check the terminal window where it's running to see live request logs.
+*   **Access the Admin Panel:** Open your browser and navigate to `http://127.0.0.1:5000` (or your configured admin port). Here you can view logs and download any captured files.
+*   **Verify Interception:** Visit an HTTPS site and click the padlock icon in the address bar. The certificate details should show it was issued by **"Proxyhoxy Root CA"**, confirming that your MITM is active.
+
+## Disclaimer
+
+This tool is intended for educational and authorized security testing purposes only. The user is responsible for all their actions. Decrypting network traffic without explicit, authorized consent is illegal and unethical. The developer of this tool is not responsible for its misuse.
+```
