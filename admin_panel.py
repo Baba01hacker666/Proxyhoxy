@@ -4,8 +4,9 @@ import html
 import configparser
 from urllib.parse import unquote
 import base64
+import json
+import threading
 
-# --- CONFIGURATION ---
 config = configparser.ConfigParser()
 config.read('config.ini')
 
@@ -14,14 +15,18 @@ LOG_FILE_PATH = settings.get('log_file', 'datapassed.txt')
 EXT_FILE_PATH = settings.get('ext_log_file', 'extinon.txt')
 DOWNLOAD_FOLDER = settings.get('download_folder', 'downloads')
 ADMIN_PORT = settings.getint('admin_port', 5000)
-
 CA_CERT_FILE = os.path.join("certs", "ca.crt")
-
-# Admin credentials (add these to your config.ini under [settings])
 ADMIN_USER = settings.get('admin_user', 'admin')
-ADMIN_PASS = settings.get('admin_password', 'changeme')  # CHANGE THIS IN PRODUCTION
+ADMIN_PASS = settings.get('admin_password', 'changeme')
 
 os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
+
+# Live traffic import (assume same process)
+try:
+    from proxy_server import ACTIVE_REQUESTS, ACTIVE_REQUESTS_LOCK
+except ImportError:
+    ACTIVE_REQUESTS = {}
+    ACTIVE_REQUESTS_LOCK = threading.Lock()
 
 def check_auth(header_value):
     if not header_value or not header_value.startswith("Basic "):
@@ -42,12 +47,10 @@ class AdminHandler(http.server.SimpleHTTPRequestHandler):
         self.wfile.write(b'Authentication required.')
 
     def do_GET(self):
-        # BASIC AUTH CHECK
         auth_header = self.headers.get('Authorization')
         if not check_auth(auth_header):
             self.do_AUTHHEAD()
             return
-
         if self.path == '/':
             self.show_dashboard()
         elif self.path == '/files':
@@ -60,6 +63,8 @@ class AdminHandler(http.server.SimpleHTTPRequestHandler):
             self.serve_ca_cert()
         elif self.path.startswith('/download/'):
             self.handle_file_download()
+        elif self.path == '/live':
+            self.show_live_traffic()
         else:
             self.send_error(404, "File Not Found")
 
@@ -72,7 +77,7 @@ class AdminHandler(http.server.SimpleHTTPRequestHandler):
         <html>
         <head>
             <title>{html.escape(title)}</title>
-            <style> body {{ font-family: sans-serif; margin: 2em; }} pre {{ background-color: #f4f4f4; border: 1px solid #ddd; padding: 1em; white-space: pre-wrap; }} .ca-box {{ border: 2px dashed red; padding: 1em; margin-top: 1em; }}</style>
+            <style> body {{ font-family: sans-serif; margin: 2em; }} pre {{ background-color: #f4f4f4; border: 1px solid #ddd; padding: 1em; white-space: pre-wrap; }} .ca-box {{ border: 2px dashed red; padding: 1em; margin-top: 2em; }} table {{ border-collapse: collapse; }} th, td {{ padding: 6px 10px; border: 1px solid #ccc; }}</style>
         </head>
         <body>
             <h1>{html.escape(title)}</h1>
@@ -98,6 +103,7 @@ class AdminHandler(http.server.SimpleHTTPRequestHandler):
             <li><h2><a href='/logs'>View Request Logs</a></h2></li>
             <li><h2><a href='/extensions'>View File Extensions Log</a></h2></li>
             <li><h2><a href='/files'>Browse Downloaded Files</a></h2></li>
+            <li><h2><a href='/live'>Live Traffic View</a></h2></li>
         </ul>
         {ca_download_section}
         """
@@ -152,6 +158,24 @@ class AdminHandler(http.server.SimpleHTTPRequestHandler):
                 self.send_error(404, "File Not Found")
         except Exception as e:
             self.send_error(500, f"Server Error: {e}")
+
+    def show_live_traffic(self):
+        with ACTIVE_REQUESTS_LOCK:
+            live_data = list(ACTIVE_REQUESTS.values())
+        rows = "".join(
+            f"<tr><td>{html.escape(r['start'])}</td><td>{html.escape(r['client_ip'])}</td><td>{html.escape(r['method'])}</td><td>{html.escape(r['path'])}</td></tr>"
+            for r in live_data
+        )
+        table = f"""
+        <table>
+            <tr><th>Timestamp</th><th>Client IP</th><th>Method</th><th>Path</th></tr>
+            {rows if rows else "<tr><td colspan='4'><i>No active requests</i></td></tr>"}
+        </table>
+        <script>
+        setTimeout(function(){{window.location.reload();}}, 3000);
+        </script>
+        """
+        self._serve_html("Live Traffic View", table)
 
 def run_server(port=ADMIN_PORT):
     server_address = ('', port)
