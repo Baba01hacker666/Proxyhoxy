@@ -1,16 +1,9 @@
-
----
-### **`Proxyhoxy-main/admin_panel.py` (Updated)**
-
-The admin panel now serves the CA certificate.
-
-```python
-# Proxyhoxy-main/admin_panel.py
 import http.server
 import os
 import html
 import configparser
 from urllib.parse import unquote
+import base64
 
 # --- CONFIGURATION ---
 config = configparser.ConfigParser()
@@ -24,14 +17,37 @@ ADMIN_PORT = settings.getint('admin_port', 5000)
 
 CA_CERT_FILE = os.path.join("certs", "ca.crt")
 
+# Admin credentials (add these to your config.ini under [settings])
+ADMIN_USER = settings.get('admin_user', 'admin')
+ADMIN_PASS = settings.get('admin_password', 'changeme')  # CHANGE THIS IN PRODUCTION
+
 os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
 
+def check_auth(header_value):
+    if not header_value or not header_value.startswith("Basic "):
+        return False
+    try:
+        auth_decoded = base64.b64decode(header_value.split(" ", 1)[1]).decode("utf-8")
+        username, password = auth_decoded.split(":", 1)
+        return username == ADMIN_USER and password == ADMIN_PASS
+    except Exception:
+        return False
+
 class AdminHandler(http.server.SimpleHTTPRequestHandler):
-    """
-    Handles requests to the admin panel, serving logs, files, and the CA certificate.
-    """
+    def do_AUTHHEAD(self):
+        self.send_response(401)
+        self.send_header('WWW-Authenticate', 'Basic realm="Proxyhoxy Admin"')
+        self.send_header('Content-type', 'text/html')
+        self.end_headers()
+        self.wfile.write(b'Authentication required.')
+
     def do_GET(self):
-        """Handle GET requests."""
+        # BASIC AUTH CHECK
+        auth_header = self.headers.get('Authorization')
+        if not check_auth(auth_header):
+            self.do_AUTHHEAD()
+            return
+
         if self.path == '/':
             self.show_dashboard()
         elif self.path == '/files':
@@ -48,7 +64,6 @@ class AdminHandler(http.server.SimpleHTTPRequestHandler):
             self.send_error(404, "File Not Found")
 
     def _serve_html(self, title, content):
-        """Helper function to serve a standard HTML page."""
         self.send_response(200)
         self.send_header('Content-type', 'text/html; charset=utf-8')
         self.end_headers()
@@ -69,7 +84,6 @@ class AdminHandler(http.server.SimpleHTTPRequestHandler):
         self.wfile.write(html_content.encode('utf-8'))
 
     def show_dashboard(self):
-        """Displays the admin dashboard."""
         ca_download_section = ""
         if os.path.exists(CA_CERT_FILE):
             ca_download_section = f"""
@@ -90,21 +104,17 @@ class AdminHandler(http.server.SimpleHTTPRequestHandler):
         self._serve_html("Proxy Admin Panel", content)
 
     def serve_ca_cert(self):
-        """Serves the CA certificate for download."""
         if not os.path.exists(CA_CERT_FILE):
             self.send_error(404, "CA Certificate not found. Run generate_ca.py first.")
             return
-        
         self.send_response(200)
         self.send_header('Content-Disposition', 'attachment; filename="ca.crt"')
         self.send_header('Content-Type', 'application/x-x509-ca-cert')
         self.end_headers()
         with open(CA_CERT_FILE, 'rb') as f:
             self.wfile.write(f.read())
-            
-    # ... (other methods like show_logs, show_files, handle_file_download remain the same) ...
+
     def show_logs(self, file_path, title):
-        """Displays the content of a given log file."""
         log_content = "<h3>No logs available.</h3>"
         if os.path.exists(file_path):
             try:
@@ -115,7 +125,6 @@ class AdminHandler(http.server.SimpleHTTPRequestHandler):
         self._serve_html(title, log_content)
 
     def show_files(self):
-        """Lists files available for download."""
         content = "<h3>No files available for download.</h3>"
         if os.path.exists(DOWNLOAD_FOLDER) and os.listdir(DOWNLOAD_FOLDER):
             file_links = []
@@ -126,7 +135,6 @@ class AdminHandler(http.server.SimpleHTTPRequestHandler):
         self._serve_html("Downloadable Files", content)
 
     def handle_file_download(self):
-        """Serves a requested file securely."""
         try:
             filename = os.path.basename(unquote(self.path[len('/download/'):]))
             file_path = os.path.join(DOWNLOAD_FOLDER, filename)
@@ -146,10 +154,9 @@ class AdminHandler(http.server.SimpleHTTPRequestHandler):
             self.send_error(500, f"Server Error: {e}")
 
 def run_server(port=ADMIN_PORT):
-    """Starts the admin panel server."""
     server_address = ('', port)
     httpd = http.server.HTTPServer(server_address, AdminHandler)
-    print(f"Admin panel running on http://127.0.0.1:{port}")
+    print(f"Admin panel running on http://127.0.0.1:{port} (username: {ADMIN_USER})")
     httpd.serve_forever()
 
 if __name__ == "__main__":
