@@ -7,8 +7,10 @@ import configparser
 import threading
 import select
 import urllib.request
+import urllib.parse
 import json
 from datetime import datetime
+import admin_panel
 from socketserver import ThreadingMixIn
 from OpenSSL import crypto
 
@@ -155,6 +157,12 @@ class Proxy(http.server.BaseHTTPRequestHandler):
         try:
             url = f"http://{self.headers['Host']}{self.path}"
             req_headers = {key: value for key, value in self.headers.items()}
+
+            # Strip Accept-Encoding to prevent receiving compressed bodies we can't cleanly modify
+            keys_to_delete = [k for k in req_headers if k.lower() == 'accept-encoding']
+            for k in keys_to_delete:
+                del req_headers[k]
+
             req = urllib.request.Request(url, headers=req_headers, method=self.command)
             req_body = None
 
@@ -298,7 +306,39 @@ class Proxy(http.server.BaseHTTPRequestHandler):
         return any(path.lower().endswith(ext) for ext in DOWNLOAD_EXTENSIONS if ext)
 
     def download_file(self):
-        self.send_error(501, "Download functionality not shown in this version")
+        try:
+            url = f"http://{self.headers['Host']}{self.path}"
+            req_headers = {key: value for key, value in self.headers.items()}
+            keys_to_delete = [k for k in req_headers if k.lower() == 'accept-encoding']
+            for k in keys_to_delete:
+                del req_headers[k]
+
+            req = urllib.request.Request(url, headers=req_headers, method=self.command)
+            
+            with urllib.request.urlopen(req, timeout=10) as response:
+                resp_status = response.getcode()
+                self.send_response(resp_status)
+                for key, value in response.getheaders():
+                    self.send_header(key, value)
+                self.end_headers()
+                
+                filename = os.path.basename(urllib.parse.urlparse(self.path).path)
+                if not filename:
+                    filename = f"download_{int(datetime.now().timestamp())}"
+                    
+                filepath = os.path.join(DOWNLOAD_FOLDER, filename)
+                
+                with open(filepath, 'wb') as f:
+                    while True:
+                        chunk = response.read(8192)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                        self.wfile.write(chunk)
+                        
+            self._log_advanced(self.command, self.path, req_headers=req_headers, resp_status=resp_status)
+        except Exception as e:
+            self.send_error(502, f"Proxy Error (Download): {e}")
 
     def log_request_details(self, method, path):
         log_entry = (
@@ -319,6 +359,10 @@ def main():
         return
 
     try:
+        # Start admin panel in a background thread to share memory space
+        admin_thread = threading.Thread(target=admin_panel.run_server, daemon=True)
+        admin_thread.start()
+
         server_address = ("", PROXY_PORT)
         httpd = ThreadedHTTPServer(server_address, Proxy)
         print(f"[*] Proxy server running on port {PROXY_PORT}...")

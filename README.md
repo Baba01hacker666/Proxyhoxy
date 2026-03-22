@@ -91,10 +91,10 @@ Google = Proxyhoxy
 
 ### Step 6: Run Proxyhoxy
 
-Start both the proxy server and the admin panel with a single command.
+Start the proxy server with a single command. The admin panel will start automatically in the background.
 
 ```bash
-python3 proxy_server.py & python3 admin_panel.py
+python3 proxy_server.py
 ```
 The terminal will confirm that both servers are running.
 

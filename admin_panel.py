@@ -178,7 +178,7 @@ class AdminHandler(http.server.SimpleHTTPRequestHandler):
         self._serve_html("Live Traffic View", table)
 
 def run_server(port=ADMIN_PORT):
-    server_address = ('', port)
+    server_address = ('127.0.0.1', port)
     httpd = http.server.HTTPServer(server_address, AdminHandler)
     print(f"Admin panel running on http://127.0.0.1:{port} (username: {ADMIN_USER})")
     httpd.serve_forever()
