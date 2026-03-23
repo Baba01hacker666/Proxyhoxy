@@ -49,3 +49,6 @@ worktrees/
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Agent Generated Docs
+docs/
