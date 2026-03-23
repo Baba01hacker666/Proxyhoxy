@@ -155,34 +155,60 @@ class Proxy(http.server.BaseHTTPRequestHandler):
 
     def proxy_http_request(self, req_id=None):
         try:
-            url = f"http://{self.headers['Host']}{self.path}"
-            req_headers = {key: value for key, value in self.headers.items()}
+            host_header = self.headers.get('Host', '')
+            if not host_header:
+                self.send_error(400, "Bad Request: No Host header")
+                return
 
-            # Strip Accept-Encoding to prevent receiving compressed bodies we can't cleanly modify
-            keys_to_delete = [k for k in req_headers if k.lower() == 'accept-encoding']
-            for k in keys_to_delete:
-                del req_headers[k]
+            if ':' in host_header:
+                host, port = host_header.split(':', 1)
+                port = int(port)
+            else:
+                host = host_header
+                port = 80
 
-            req = urllib.request.Request(url, headers=req_headers, method=self.command)
+            dest_socket = socket.create_connection((host, port), timeout=10)
+
+            # Strip Accept-Encoding if modifying content
+            req_headers = {key: value for key, value in self.headers.items() if key.lower() != 'proxy-connection'}
+            if ENABLE_REPLACEMENT and REPLACEMENTS:
+                keys_to_delete = [k for k in req_headers if k.lower() == 'accept-encoding']
+                for k in keys_to_delete:
+                    del req_headers[k]
+
+            req_line = f"{self.command} {self.path} {self.request_version}\r\n"
+            headers_str = "".join(f"{k}: {v}\r\n" for k, v in req_headers.items())
+            request_data = (req_line + headers_str + "\r\n").encode('utf-8')
+            dest_socket.sendall(request_data)
+
             req_body = None
-
             if 'Content-Length' in self.headers:
                 content_len = int(self.headers['Content-Length'])
                 req_body = self.rfile.read(content_len)
-                req.data = req_body
+                dest_socket.sendall(req_body)
 
-            with urllib.request.urlopen(req, timeout=10) as response:
-                resp_status = response.getcode()
-                self.send_response(resp_status)
-                for key, value in response.getheaders():
-                    self.send_header(key, value)
-                self.end_headers()
-
-                content = response.read()
+            if ENABLE_REPLACEMENT and REPLACEMENTS:
+                import http.client
+                resp = http.client.HTTPResponse(dest_socket)
+                resp.begin()
+                
+                self.send_response(resp.status)
+                for header, value in resp.getheaders():
+                    if header.lower() != 'content-length':
+                        self.send_header(header, value)
+                
+                content = resp.read()
                 modified_content = self.modify_content(content)
+                self.send_header("Content-Length", str(len(modified_content)))
+                self.end_headers()
                 self.wfile.write(modified_content)
+                
+                self._log_advanced(self.command, self.path, req_headers=req_headers, req_body=req_body, resp_status=resp.status)
+                dest_socket.close()
+            else:
+                self.shuttle_data(self.connection, dest_socket, req_id=req_id)
+                self._log_advanced(self.command, self.path, req_headers=req_headers, req_body=req_body)
 
-            self._log_advanced(self.command, self.path, req_headers=req_headers, req_body=req_body, resp_status=resp_status)
         except Exception as e:
             self.send_error(502, f"Proxy Error: {e}")
 
