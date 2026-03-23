@@ -108,6 +108,11 @@ class Proxy(http.server.BaseHTTPRequestHandler):
         }
         with open(LOG_FILE, 'a', encoding='utf-8') as f:
             f.write(json.dumps(log_entry) + "\n")
+        
+        # Print clean log to CLI
+        color = "\033[92m" if method in ["GET", "POST"] else "\033[94m" # Green for standard, Blue for others
+        reset = "\033[0m"
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] {color}{method:10}{reset} {self.client_address[0]} -> {path}")
 
     def _add_active_request(self, method, path):
         req_id = get_request_id()
