@@ -333,39 +333,57 @@ class Proxy(http.server.BaseHTTPRequestHandler):
 
     def download_file(self):
         try:
-            url = f"http://{self.headers['Host']}{self.path}"
-            req_headers = {key: value for key, value in self.headers.items()}
+            host_header = self.headers.get('Host', '')
+            if not host_header:
+                self.send_error(400, "Bad Request: No Host header")
+                return
+
+            if ':' in host_header:
+                host, port = host_header.split(':', 1)
+                port = int(port)
+            else:
+                host = host_header
+                port = 80
+
+            dest_socket = socket.create_connection((host, port), timeout=10)
+
+            req_headers = {key: value for key, value in self.headers.items() if key.lower() != 'proxy-connection'}
             keys_to_delete = [k for k in req_headers if k.lower() == 'accept-encoding']
             for k in keys_to_delete:
                 del req_headers[k]
 
-            req = urllib.request.Request(url, headers=req_headers, method=self.command)
-            
-            with urllib.request.urlopen(req, timeout=10) as response:
-                resp_status = response.getcode()
-                self.send_response(resp_status)
-                for key, value in response.getheaders():
-                    self.send_header(key, value)
-                self.end_headers()
-                
-                filename = os.path.basename(urllib.parse.urlparse(self.path).path)
-                if not filename:
-                    filename = f"download_{int(datetime.now().timestamp())}"
-                    
-                filepath = os.path.join(DOWNLOAD_FOLDER, filename)
-                
-                with open(filepath, 'wb') as f:
-                    while True:
-                        chunk = response.read(8192)
-                        if not chunk:
-                            break
-                        f.write(chunk)
-                        self.wfile.write(chunk)
-                        
-            self._log_advanced(self.command, self.path, req_headers=req_headers, resp_status=resp_status)
+            req_line = f"{self.command} {self.path} {self.request_version}\r\n"
+            headers_str = "".join(f"{k}: {v}\r\n" for k, v in req_headers.items())
+            request_data = (req_line + headers_str + "\r\n").encode('utf-8')
+            dest_socket.sendall(request_data)
+
+            import http.client
+            resp = http.client.HTTPResponse(dest_socket)
+            resp.begin()
+
+            self.send_response(resp.status)
+            for header, value in resp.getheaders():
+                self.send_header(header, value)
+            self.end_headers()
+
+            filename = os.path.basename(urllib.parse.urlparse(self.path).path)
+            if not filename:
+                filename = f"download_{int(datetime.now().timestamp())}"
+
+            filepath = os.path.join(DOWNLOAD_FOLDER, filename)
+
+            with open(filepath, 'wb') as f:
+                while True:
+                    chunk = resp.read(8192)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    self.wfile.write(chunk)
+
+            self._log_advanced(self.command, self.path, req_headers=req_headers, resp_status=resp.status)
+            dest_socket.close()
         except Exception as e:
             self.send_error(502, f"Proxy Error (Download): {e}")
-
     def log_request_details(self, method, path):
         log_entry = (
             f"--- Request: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ---\n"
