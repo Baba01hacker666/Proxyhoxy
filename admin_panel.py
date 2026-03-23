@@ -74,15 +74,36 @@ class AdminHandler(http.server.SimpleHTTPRequestHandler):
         self.end_headers()
         html_content = f"""
         <!DOCTYPE html>
-        <html>
+        <html lang="en">
         <head>
-            <title>{html.escape(title)}</title>
-            <style> body {{ font-family: sans-serif; margin: 2em; }} pre {{ background-color: #f4f4f4; border: 1px solid #ddd; padding: 1em; white-space: pre-wrap; }} .ca-box {{ border: 2px dashed red; padding: 1em; margin-top: 2em; }} table {{ border-collapse: collapse; }} th, td {{ padding: 6px 10px; border: 1px solid #ccc; }}</style>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>{html.escape(title)} - Proxyhoxy Admin</title>
+            <script src="https://cdn.tailwindcss.com"></script>
         </head>
-        <body>
-            <h1>{html.escape(title)}</h1>
-            {content}
-            <br><hr><a href='/'>Back to Dashboard</a>
+        <body class="bg-gray-50 text-gray-800 font-sans min-h-screen">
+            <nav class="bg-indigo-600 text-white shadow-md">
+                <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                    <div class="flex items-center justify-between h-16">
+                        <div class="flex items-center">
+                            <span class="font-bold text-xl tracking-tight">Proxyhoxy Admin</span>
+                        </div>
+                        <div class="flex space-x-4">
+                            <a href="/" class="hover:bg-indigo-500 px-3 py-2 rounded-md text-sm font-medium transition-colors">Dashboard</a>
+                        </div>
+                    </div>
+                </div>
+            </nav>
+            <main class="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
+                <div class="bg-white shadow rounded-lg overflow-hidden">
+                    <div class="px-4 py-5 border-b border-gray-200 sm:px-6">
+                        <h1 class="text-2xl font-bold leading-6 text-gray-900">{html.escape(title)}</h1>
+                    </div>
+                    <div class="p-6">
+                        {content}
+                    </div>
+                </div>
+            </main>
         </body>
         </html>
         """
@@ -92,22 +113,44 @@ class AdminHandler(http.server.SimpleHTTPRequestHandler):
         ca_download_section = ""
         if os.path.exists(CA_CERT_FILE):
             ca_download_section = f"""
-            <div class="ca-box">
-                <h2>Download CA Certificate</h2>
-                <p>To intercept HTTPS traffic, you must install this certificate in your browser.</p>
-                <p><a href='/download-ca'>Download ca.crt</a></p>
+            <div class="mt-8 bg-red-50 border-l-4 border-red-400 p-4 rounded-md">
+                <div class="flex">
+                    <div class="ml-3">
+                        <h3 class="text-sm font-medium text-red-800">Download CA Certificate</h3>
+                        <div class="mt-2 text-sm text-red-700">
+                            <p>To intercept HTTPS traffic, you must install this certificate in your browser.</p>
+                        </div>
+                        <div class="mt-4">
+                            <a href='/download-ca' class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-red-700 bg-red-100 hover:bg-red-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors">
+                                Download ca.crt
+                            </a>
+                        </div>
+                    </div>
+                </div>
             </div>
             """
         content = f"""
-        <ul>
-            <li><h2><a href='/logs'>View Request Logs</a></h2></li>
-            <li><h2><a href='/extensions'>View File Extensions Log</a></h2></li>
-            <li><h2><a href='/files'>Browse Downloaded Files</a></h2></li>
-            <li><h2><a href='/live'>Live Traffic View</a></h2></li>
-        </ul>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <a href='/logs' class="block p-6 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-lg shadow-sm transition-colors">
+                <h2 class="text-xl font-semibold text-gray-900 mb-2">Request Logs</h2>
+                <p class="text-gray-600">View detailed HTTP/HTTPS request history.</p>
+            </a>
+            <a href='/extensions' class="block p-6 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-lg shadow-sm transition-colors">
+                <h2 class="text-xl font-semibold text-gray-900 mb-2">File Extensions Log</h2>
+                <p class="text-gray-600">View logs of intercepted file extensions.</p>
+            </a>
+            <a href='/files' class="block p-6 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-lg shadow-sm transition-colors">
+                <h2 class="text-xl font-semibold text-gray-900 mb-2">Downloaded Files</h2>
+                <p class="text-gray-600">Browse and download intercepted files.</p>
+            </a>
+            <a href='/live' class="block p-6 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg shadow-sm transition-colors">
+                <h2 class="text-xl font-semibold text-indigo-900 mb-2">Live Traffic</h2>
+                <p class="text-indigo-700">Monitor active connections in real-time.</p>
+            </a>
+        </div>
         {ca_download_section}
         """
-        self._serve_html("Proxy Admin Panel", content)
+        self._serve_html("Dashboard", content)
 
     def serve_ca_cert(self):
         if not os.path.exists(CA_CERT_FILE):
@@ -121,24 +164,35 @@ class AdminHandler(http.server.SimpleHTTPRequestHandler):
             self.wfile.write(f.read())
 
     def show_logs(self, file_path, title):
-        log_content = "<h3>No logs available.</h3>"
+        log_content = "<div class='text-gray-500 italic'>No logs available.</div>"
         if os.path.exists(file_path):
             try:
                 with open(file_path, 'r', encoding='utf-8') as log_file:
-                    log_content = f"<pre>{html.escape(log_file.read())}</pre>"
+                    log_content = f"<pre class='bg-gray-900 text-gray-100 p-4 rounded-md overflow-x-auto text-sm font-mono'>{html.escape(log_file.read())}</pre>"
             except Exception as e:
-                log_content = f"<h3>Error reading log file: {html.escape(str(e))}</h3>"
+                log_content = f"<div class='text-red-600 font-medium'>Error reading log file: {html.escape(str(e))}</div>"
         self._serve_html(title, log_content)
 
     def show_files(self):
-        content = "<h3>No files available for download.</h3>"
+        content = "<div class='text-gray-500 italic'>No files available for download.</div>"
         if os.path.exists(DOWNLOAD_FOLDER) and os.listdir(DOWNLOAD_FOLDER):
             file_links = []
             for filename in os.listdir(DOWNLOAD_FOLDER):
                 safe_name = html.escape(filename)
-                file_links.append(f"<li><a href='/download/{safe_name}'>{safe_name}</a></li>")
-            content = f"<ul>{''.join(file_links)}</ul>"
-        self._serve_html("Downloadable Files", content)
+                file_links.append(f"""
+                <li class="py-3 sm:py-4">
+                    <div class="flex items-center space-x-4">
+                        <div class="flex-1 min-w-0">
+                            <p class="text-sm font-medium text-gray-900 truncate">{safe_name}</p>
+                        </div>
+                        <div class="inline-flex items-center text-base font-semibold text-gray-900">
+                            <a href='/download/{safe_name}' class="text-indigo-600 hover:text-indigo-900 text-sm">Download</a>
+                        </div>
+                    </div>
+                </li>
+                """)
+            content = f"<ul class='divide-y divide-gray-200'>{''.join(file_links)}</ul>"
+        self._serve_html("Intercepted Files", content)
 
     def handle_file_download(self):
         try:
@@ -163,14 +217,31 @@ class AdminHandler(http.server.SimpleHTTPRequestHandler):
         with ACTIVE_REQUESTS_LOCK:
             live_data = list(ACTIVE_REQUESTS.values())
         rows = "".join(
-            f"<tr><td>{html.escape(r['start'])}</td><td>{html.escape(r['client_ip'])}</td><td>{html.escape(r['method'])}</td><td>{html.escape(r['path'])}</td></tr>"
+            f"<tr class='hover:bg-gray-50'><td class='px-6 py-4 whitespace-nowrap text-sm text-gray-500'>{html.escape(r['start'])}</td><td class='px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900'>{html.escape(r['client_ip'])}</td><td class='px-6 py-4 whitespace-nowrap text-sm text-gray-500'><span class='px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-indigo-100 text-indigo-800'>{html.escape(r['method'])}</span></td><td class='px-6 py-4 text-sm text-gray-500 truncate max-w-xs' title='{html.escape(r['path'])}'>{html.escape(r['path'])}</td></tr>"
             for r in live_data
         )
         table = f"""
-        <table>
-            <tr><th>Timestamp</th><th>Client IP</th><th>Method</th><th>Path</th></tr>
-            {rows if rows else "<tr><td colspan='4'><i>No active requests</i></td></tr>"}
-        </table>
+        <div class="flex flex-col">
+            <div class="-my-2 overflow-x-auto sm:-mx-6 lg:-mx-8">
+                <div class="py-2 align-middle inline-block min-w-full sm:px-6 lg:px-8">
+                    <div class="shadow overflow-hidden border-b border-gray-200 sm:rounded-lg">
+                        <table class="min-w-full divide-y divide-gray-200">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Timestamp</th>
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Client IP</th>
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Method</th>
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Path</th>
+                                </tr>
+                            </thead>
+                            <tbody class="bg-white divide-y divide-gray-200">
+                                {rows if rows else "<tr><td colspan='4' class='px-6 py-4 text-center text-sm text-gray-500 italic'>No active requests at the moment</td></tr>"}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
         <script>
         setTimeout(function(){{window.location.reload();}}, 3000);
         </script>

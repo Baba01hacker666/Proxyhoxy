@@ -110,7 +110,9 @@ The terminal will confirm that both servers are running.
 ## Usage
 
 *   **Browse the web:** Your traffic will now be routed through Proxyhoxy. Check the terminal window where it's running to see live request logs.
-*   **Access the Admin Panel:** Open your browser and navigate to `http://127.0.0.1:5000` (or your configured admin port). Here you can view logs and download any captured files.
+*   **Access the Admin Panel:** Open your browser and navigate to `http://127.0.0.1:5000` (or your configured admin port).
+    *   **Default Username:** `admin`
+    *   **Default Password:** `changeme`
 *   **Verify Interception:** Visit an HTTPS site and click the padlock icon in the address bar. The certificate details should show it was issued by **"Proxyhoxy Root CA"**, confirming that your MITM is active.
 
 ## Disclaimer
