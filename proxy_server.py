@@ -249,6 +249,8 @@ class Proxy(http.server.BaseHTTPRequestHandler):
         self.shuttle_data(ssl_client_socket, ssl_dest_socket, req_id=req_id)
 
     def shuttle_data(self, client_socket, dest_socket, req_id=None):
+        client_socket.setblocking(False)
+        dest_socket.setblocking(False)
         sockets = [client_socket, dest_socket]
         try:
             while True:
@@ -257,19 +259,22 @@ class Proxy(http.server.BaseHTTPRequestHandler):
                     break
                 
                 for sock in readable:
-                    data = sock.recv(8192)
-                    if not data:
+                    try:
+                        data = sock.recv(8192)
+                        if not data:
+                            return
+                        
+                        if sock is client_socket:
+                            dest_socket.sendall(data)
+                            self._log_advanced("HTTPS-REQUEST", self.path, req_body=data)
+                        else:
+                            modified_data = self.modify_content(data)
+                            client_socket.sendall(modified_data)
+                            self._log_advanced("HTTPS-RESPONSE", self.path, req_body=data)
+                    except BlockingIOError:
+                        continue
+                    except (ConnectionResetError, socket.error):
                         return
-
-                    if sock is client_socket:
-                        dest_socket.sendall(data)
-                        # Optionally log request body for HTTPS
-                        self._log_advanced("HTTPS-REQUEST", self.path, req_body=data)
-                    else:
-                        modified_data = self.modify_content(data)
-                        client_socket.sendall(modified_data)
-                        # Optionally log response body for HTTPS
-                        self._log_advanced("HTTPS-RESPONSE", self.path, req_body=data)
                 if exceptional:
                     break
         except Exception:
@@ -278,9 +283,10 @@ class Proxy(http.server.BaseHTTPRequestHandler):
             for sock in sockets:
                 try:
                     sock.shutdown(socket.SHUT_RDWR)
-                    sock.close()
                 except Exception:
                     pass
+                finally:
+                    sock.close()
 
     def tunnel_connection(self, req_id=None):
         try:
@@ -298,28 +304,42 @@ class Proxy(http.server.BaseHTTPRequestHandler):
         dest_socket.setblocking(False)
 
         sockets = [client_socket, dest_socket]
-        while True:
-            try:
+        try:
+            while sockets:
                 readable, _, exceptional = select.select(sockets, [], sockets, 5)
                 if not readable and not exceptional:
                     break
                 
                 for sock in readable:
-                    data = sock.recv(8192)
-                    if not data:
-                        sockets.remove(sock)
+                    try:
+                        data = sock.recv(8192)
+                        if not data:
+                            if sock in sockets:
+                                sockets.remove(sock)
+                            continue
+                        
+                        if sock is client_socket:
+                            dest_socket.sendall(data)
+                        else:
+                            client_socket.sendall(data)
+                    except BlockingIOError:
                         continue
-                    
-                    if sock is client_socket:
-                        dest_socket.sendall(data)
-                    else:
-                        client_socket.sendall(data)
+                    except (ConnectionResetError, socket.error):
+                        if sock in sockets:
+                            sockets.remove(sock)
                 if exceptional:
                     break
+        except Exception:
+            pass
+        finally:
+            try:
+                client_socket.close()
             except Exception:
-                break
-        client_socket.close()
-        dest_socket.close()
+                pass
+            try:
+                dest_socket.close()
+            except Exception:
+                pass
 
     def modify_content(self, content: bytes) -> bytes:
         if not (ENABLE_REPLACEMENT and REPLACEMENTS):
