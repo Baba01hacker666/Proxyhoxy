@@ -67,6 +67,8 @@ class AdminHandler(http.server.SimpleHTTPRequestHandler):
             self.show_live_traffic()
         elif self.path == '/api/live':
             self.serve_live_api()
+        elif self.path == '/config' or self.path.startswith('/config?'):
+            self.show_config()
         else:
             self.send_error(404, "File Not Found")
 
@@ -156,6 +158,10 @@ class AdminHandler(http.server.SimpleHTTPRequestHandler):
             <a href='/live' class="block p-6 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg shadow-sm transition-colors">
                 <h2 class="text-xl font-semibold text-indigo-900 mb-2">Live Traffic</h2>
                 <p class="text-indigo-700">Monitor active connections in real-time.</p>
+            </a>
+            <a href='/config' class="block p-6 bg-green-50 hover:bg-green-100 border border-green-200 rounded-lg shadow-sm transition-colors">
+                <h2 class="text-xl font-semibold text-green-900 mb-2">Configuration</h2>
+                <p class="text-green-700">Live edit proxy settings and replacements.</p>
             </a>
         </div>
         {ca_download_section}
@@ -287,6 +293,121 @@ class AdminHandler(http.server.SimpleHTTPRequestHandler):
         </script>
         """
         self._serve_html("Live Traffic View", table)
+
+    def show_config(self):
+        c = configparser.ConfigParser()
+        c.read('config.ini')
+        
+        settings = c['settings'] if 'settings' in c else {}
+        mitm = c['mitm'] if 'mitm' in c else {}
+        mod = c['content_modification'] if 'content_modification' in c else {}
+
+        replacements = [k for k in mod.keys() if k != 'enable_replacement']
+        
+        replacements_html = ""
+        for k in replacements:
+            replacements_html += f"""
+            <div class="flex items-center space-x-2 mb-2 replacement-row">
+                <input type="text" name="rep_key[]" value="{html.escape(k)}" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2" placeholder="Keyword">
+                <span class="text-gray-500">→</span>
+                <input type="text" name="rep_val[]" value="{html.escape(mod[k])}" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2" placeholder="Replacement">
+                <button type="button" onclick="this.parentElement.remove()" class="bg-red-100 text-red-600 p-2 rounded hover:bg-red-200">X</button>
+            </div>
+            """
+
+        from urllib.parse import urlparse, parse_qs
+        query = parse_qs(urlparse(self.path).query)
+        saved_banner = ""
+        if 'saved' in query:
+            saved_banner = """
+            <div class="mb-4 bg-green-50 border-l-4 border-green-400 p-4 rounded-md">
+                <div class="flex">
+                    <div class="ml-3">
+                        <p class="text-sm text-green-700">Configuration saved successfully and live settings updated!</p>
+                    </div>
+                </div>
+            </div>
+            """
+
+        form = f"""
+        {saved_banner}
+        <form action="/config" method="POST" class="space-y-6">
+            <div class="bg-gray-50 p-4 rounded-md">
+                <h3 class="text-lg font-medium leading-6 text-gray-900 mb-4">Proxy Settings</h3>
+                <div class="grid grid-cols-1 gap-y-6 gap-x-4 sm:grid-cols-2">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">Proxy Port</label>
+                        <input type="number" name="proxy_port" value="{settings.get('proxy_port', '8080')}" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">Admin Port</label>
+                        <input type="number" name="admin_port" value="{settings.get('admin_port', '5000')}" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2">
+                    </div>
+                    <div class="sm:col-span-2">
+                        <label class="block text-sm font-medium text-gray-700">Download Extensions (comma separated)</label>
+                        <input type="text" name="download_extensions" value="{settings.get('download_extensions', '')}" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2">
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-gray-50 p-4 rounded-md">
+                <h3 class="text-lg font-medium leading-6 text-gray-900 mb-4">MITM & Modification</h3>
+                <div class="space-y-4">
+                    <div class="flex items-start">
+                        <div class="flex items-center h-5">
+                            <input type="checkbox" name="enable_https_mitm" value="true" {'checked' if mitm.get('enable_https_mitm', 'false').lower() == 'true' else ''} class="focus:ring-indigo-500 h-4 w-4 text-indigo-600 border-gray-300 rounded">
+                        </div>
+                        <div class="ml-3 text-sm">
+                            <label class="font-medium text-gray-700">Enable HTTPS MITM</label>
+                            <p class="text-gray-500">Requires CA certificate to be trusted by client.</p>
+                        </div>
+                    </div>
+                    <div class="flex items-start">
+                        <div class="flex items-center h-5">
+                            <input type="checkbox" name="enable_replacement" value="true" {'checked' if mod.get('enable_replacement', 'false').lower() == 'true' else ''} class="focus:ring-indigo-500 h-4 w-4 text-indigo-600 border-gray-300 rounded">
+                        </div>
+                        <div class="ml-3 text-sm">
+                            <label class="font-medium text-gray-700">Enable Content Replacement</label>
+                            <p class="text-gray-500">Replaces keywords in text-based HTTP traffic.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mt-6">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Replacement Rules</label>
+                    <div id="replacements-container">
+                        {replacements_html}
+                    </div>
+                    <button type="button" onclick="addRule()" class="mt-2 inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-md text-indigo-700 bg-indigo-100 hover:bg-indigo-200">
+                        + Add Rule
+                    </button>
+                </div>
+            </div>
+
+            <div class="flex justify-end">
+                <button type="submit" class="ml-3 inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                    Save Configuration
+                </button>
+            </div>
+        </form>
+
+        <script>
+        function addRule() {{
+            const container = document.getElementById('replacements-container');
+            const div = document.createElement('div');
+            div.className = 'flex items-center space-x-2 mb-2 replacement-row';
+            div.innerHTML = `
+                <input type="text" name="rep_key[]" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2" placeholder="Keyword">
+                <span class="text-gray-500">→</span>
+                <input type="text" name="rep_val[]" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2" placeholder="Replacement">
+                <button type="button" onclick="this.parentElement.remove()" class="bg-red-100 text-red-600 p-2 rounded hover:bg-red-200">X</button>
+            `;
+            container.appendChild(div);
+        }}
+        </script>
+        """
+        self._serve_html("Configuration", form)
+
 
 def run_server(port=ADMIN_PORT):
     server_address = ('127.0.0.1', port)
