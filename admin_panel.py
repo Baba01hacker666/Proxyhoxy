@@ -65,8 +65,18 @@ class AdminHandler(http.server.SimpleHTTPRequestHandler):
             self.handle_file_download()
         elif self.path == '/live':
             self.show_live_traffic()
+        elif self.path == '/api/live':
+            self.serve_live_api()
         else:
             self.send_error(404, "File Not Found")
+
+    def serve_live_api(self):
+        with ACTIVE_REQUESTS_LOCK:
+            live_data = list(ACTIVE_REQUESTS.values())
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.end_headers()
+        self.wfile.write(json.dumps(live_data).encode('utf-8'))
 
     def _serve_html(self, title, content):
         self.send_response(200)
@@ -214,13 +224,7 @@ class AdminHandler(http.server.SimpleHTTPRequestHandler):
             self.send_error(500, f"Server Error: {e}")
 
     def show_live_traffic(self):
-        with ACTIVE_REQUESTS_LOCK:
-            live_data = list(ACTIVE_REQUESTS.values())
-        rows = "".join(
-            f"<tr class='hover:bg-gray-50'><td class='px-6 py-4 whitespace-nowrap text-sm text-gray-500'>{html.escape(r['start'])}</td><td class='px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900'>{html.escape(r['client_ip'])}</td><td class='px-6 py-4 whitespace-nowrap text-sm text-gray-500'><span class='px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-indigo-100 text-indigo-800'>{html.escape(r['method'])}</span></td><td class='px-6 py-4 text-sm text-gray-500 truncate max-w-xs' title='{html.escape(r['path'])}'>{html.escape(r['path'])}</td></tr>"
-            for r in live_data
-        )
-        table = f"""
+        table = """
         <div class="flex flex-col">
             <div class="-my-2 overflow-x-auto sm:-mx-6 lg:-mx-8">
                 <div class="py-2 align-middle inline-block min-w-full sm:px-6 lg:px-8">
@@ -234,8 +238,8 @@ class AdminHandler(http.server.SimpleHTTPRequestHandler):
                                     <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Path</th>
                                 </tr>
                             </thead>
-                            <tbody class="bg-white divide-y divide-gray-200">
-                                {rows if rows else "<tr><td colspan='4' class='px-6 py-4 text-center text-sm text-gray-500 italic'>No active requests at the moment</td></tr>"}
+                            <tbody id="live-table-body" class="bg-white divide-y divide-gray-200">
+                                <tr><td colspan='4' class='px-6 py-4 text-center text-sm text-gray-500 italic'>Loading...</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -243,7 +247,43 @@ class AdminHandler(http.server.SimpleHTTPRequestHandler):
             </div>
         </div>
         <script>
-        setTimeout(function(){{window.location.reload();}}, 3000);
+        function escapeHtml(unsafe) {
+            return (unsafe || '').toString()
+                 .replace(/&/g, "&amp;")
+                 .replace(/</g, "&lt;")
+                 .replace(/>/g, "&gt;")
+                 .replace(/"/g, "&quot;")
+                 .replace(/'/g, "&#039;");
+        }
+
+        async function fetchLiveTraffic() {
+            try {
+                const response = await fetch('/api/live');
+                const data = await response.json();
+                const tbody = document.getElementById('live-table-body');
+                
+                if (data.length === 0) {
+                    tbody.innerHTML = "<tr><td colspan='4' class='px-6 py-4 text-center text-sm text-gray-500 italic'>No active requests at the moment</td></tr>";
+                    return;
+                }
+                
+                tbody.innerHTML = data.map(r => `
+                    <tr class='hover:bg-gray-50'>
+                        <td class='px-6 py-4 whitespace-nowrap text-sm text-gray-500'>${escapeHtml(r.start)}</td>
+                        <td class='px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900'>${escapeHtml(r.client_ip)}</td>
+                        <td class='px-6 py-4 whitespace-nowrap text-sm text-gray-500'>
+                            <span class='px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-indigo-100 text-indigo-800'>${escapeHtml(r.method)}</span>
+                        </td>
+                        <td class='px-6 py-4 text-sm text-gray-500 truncate max-w-xs' title='${escapeHtml(r.path)}'>${escapeHtml(r.path)}</td>
+                    </tr>
+                `).join('');
+            } catch (err) {
+                console.error("Failed to fetch live traffic", err);
+            }
+        }
+        
+        fetchLiveTraffic();
+        setInterval(fetchLiveTraffic, 2000);
         </script>
         """
         self._serve_html("Live Traffic View", table)
