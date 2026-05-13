@@ -251,7 +251,102 @@ class Proxy(http.server.BaseHTTPRequestHandler):
             ssl_client_socket.close()
             return
 
-        self.shuttle_data(ssl_client_socket, ssl_dest_socket, req_id=req_id)
+        if ENABLE_REPLACEMENT and REPLACEMENTS:
+            self.mitm_http_handler(ssl_client_socket, ssl_dest_socket, req_id=req_id)
+        else:
+            self.shuttle_data(ssl_client_socket, ssl_dest_socket, req_id=req_id)
+
+    def mitm_http_handler(self, client_socket, dest_socket, req_id=None):
+        class MITMRequestReader(http.server.BaseHTTPRequestHandler):
+            def __init__(self, request_text):
+                self.rfile = request_text
+                self.raw_requestline = self.rfile.readline()
+                self.error_code = self.error_message = None
+                self.parse_request()
+
+            def send_error(self, code, message=None, explain=None):
+                self.error_code = code
+                self.error_message = message
+
+        client_file = client_socket.makefile('rwb')
+        
+        try:
+            while True:
+                request = MITMRequestReader(client_file)
+                if request.error_code or not getattr(request, 'command', None):
+                    break
+
+                req_line = f"{request.command} {request.path} {request.request_version}\r\n"
+                
+                req_headers = {key: value for key, value in request.headers.items() 
+                               if key.lower() not in ['proxy-connection', 'accept-encoding']}
+
+                headers_str = "".join(f"{k}: {v}\r\n" for k, v in req_headers.items())
+                request_data = (req_line + headers_str + "\r\n").encode('utf-8')
+                dest_socket.sendall(request_data)
+
+                req_body = None
+                if 'Content-Length' in request.headers:
+                    content_len = int(request.headers['Content-Length'])
+                    req_body = request.rfile.read(content_len)
+                    dest_socket.sendall(req_body)
+
+                self._log_advanced(f"HTTPS-{request.command}", request.path, req_headers=req_headers, req_body=req_body)
+
+                import http.client as http_client
+                resp = http_client.HTTPResponse(dest_socket)
+                resp.begin()
+
+                content_type = resp.getheader('Content-Type', '').lower()
+                is_text = any(content_type.startswith(t) for t in ['text/', 'application/json', 'application/javascript'])
+                is_chunked = resp.getheader('Transfer-Encoding', '').lower() == 'chunked'
+
+                status_line = f"HTTP/1.1 {resp.status} {resp.reason}\r\n".encode('utf-8')
+                
+                if is_text and ENABLE_REPLACEMENT and REPLACEMENTS:
+                    content = resp.read()
+                    modified_content = self.modify_content(content)
+                    
+                    client_socket.sendall(status_line)
+                    for header, value in resp.getheaders():
+                        if header.lower() not in ['content-length', 'transfer-encoding']:
+                            client_socket.sendall(f"{header}: {value}\r\n".encode('utf-8'))
+                    client_socket.sendall(f"Content-Length: {len(modified_content)}\r\n\r\n".encode('utf-8'))
+                    client_socket.sendall(modified_content)
+                else:
+                    client_socket.sendall(status_line)
+                    for header, value in resp.getheaders():
+                        client_socket.sendall(f"{header}: {value}\r\n".encode('utf-8'))
+                    client_socket.sendall(b"\r\n")
+                    
+                    while True:
+                        chunk = resp.read(8192)
+                        if not chunk:
+                            if is_chunked:
+                                client_socket.sendall(b"0\r\n\r\n")
+                            break
+                        if is_chunked:
+                            client_socket.sendall(f"{len(chunk):X}\r\n".encode('utf-8') + chunk + b"\r\n")
+                        else:
+                            client_socket.sendall(chunk)
+
+                if request.headers.get('Connection', '').lower() == 'close' or resp.getheader('Connection', '').lower() == 'close':
+                    break
+
+        except Exception as e:
+            pass
+        finally:
+            try:
+                client_socket.shutdown(socket.SHUT_RDWR)
+            except: pass
+            finally:
+                client_socket.close()
+
+            try:
+                dest_socket.shutdown(socket.SHUT_RDWR)
+            except: pass
+            finally:
+                dest_socket.close()
 
     def shuttle_data(self, client_socket, dest_socket, req_id=None):
         client_socket.setblocking(False)
