@@ -72,6 +72,76 @@ class AdminHandler(http.server.SimpleHTTPRequestHandler):
         else:
             self.send_error(404, "File Not Found")
 
+    def do_POST(self):
+        auth_header = self.headers.get('Authorization')
+        if not check_auth(auth_header):
+            self.do_AUTHHEAD()
+            return
+            
+        if self.path == '/config':
+            self.save_config()
+        else:
+            self.send_error(404, "File Not Found")
+
+    def save_config(self):
+        content_length = int(self.headers.get('Content-Length', 0))
+        post_data = self.rfile.read(content_length).decode('utf-8')
+        from urllib.parse import parse_qs
+        data = parse_qs(post_data, keep_blank_values=True)
+        
+        c = configparser.ConfigParser()
+        c.read('config.ini')
+        
+        # Update settings
+        if 'settings' not in c:
+            c.add_section('settings')
+        c['settings']['proxy_port'] = data.get('proxy_port', [str(c['settings'].get('proxy_port', '8080'))])[0]
+        c['settings']['admin_port'] = data.get('admin_port', [str(c['settings'].get('admin_port', '5000'))])[0]
+        c['settings']['download_extensions'] = data.get('download_extensions', [''])[0]
+        
+        # Update MITM
+        if 'mitm' not in c:
+            c.add_section('mitm')
+        mitm_enabled = 'enable_https_mitm' in data
+        c['mitm']['enable_https_mitm'] = 'true' if mitm_enabled else 'false'
+        
+        # Update Content Modification
+        c.remove_section('content_modification')
+        c.add_section('content_modification')
+        replacement_enabled = 'enable_replacement' in data
+        c['content_modification']['enable_replacement'] = 'true' if replacement_enabled else 'false'
+        
+        keys = data.get('rep_key[]', [])
+        vals = data.get('rep_val[]', [])
+        for k, v in zip(keys, vals):
+            k = k.strip()
+            if k:
+                c['content_modification'][k] = v.strip()
+
+        # Save to file
+        with open('config.ini', 'w') as configfile:
+            c.write(configfile)
+            
+        # Update live proxy_server variables if it's running in same process
+        try:
+            import proxy_server
+            proxy_server.DOWNLOAD_EXTENSIONS = [ext.strip() for ext in c['settings']['download_extensions'].split(',') if ext.strip()]
+            proxy_server.ENABLE_HTTPS_MITM = mitm_enabled
+            proxy_server.ENABLE_REPLACEMENT = replacement_enabled
+            
+            new_replacements = {}
+            for k, v in c['content_modification'].items():
+                if k != 'enable_replacement':
+                    new_replacements[k.encode('utf-8')] = v.encode('utf-8')
+            proxy_server.REPLACEMENTS = new_replacements
+        except Exception as e:
+            print(f"Failed to update live proxy variables: {e}")
+
+        # Redirect back with a success parameter
+        self.send_response(303)
+        self.send_header('Location', '/config?saved=1')
+        self.end_headers()
+
     def serve_live_api(self):
         with ACTIVE_REQUESTS_LOCK:
             live_data = list(ACTIVE_REQUESTS.values())
